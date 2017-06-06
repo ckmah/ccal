@@ -67,6 +67,7 @@ def hierarchical_consensus_cluster(matrix,
     clusterings = DataFrame(index=ks, columns=list(matrix.columns))
     clusterings.index.name = 'k'
     cophenetic_correlation_coefficients = {}
+    hierarchies = {}
 
     for k in ks:
         print_log('k={} ...'.format(k))
@@ -111,8 +112,9 @@ def hierarchical_consensus_cluster(matrix,
         # Get labels from hierarchical clustering
         clusterings.ix[k, :] = fcluster(
             hierarchical_clustering, k, criterion='maxclust')
+        hierarchies[k] = hierarchical_clustering
 
-    return distance_matrix, clusterings, cophenetic_correlation_coefficients
+    return distance_matrix, clusterings, cophenetic_correlation_coefficients, hierarchies
 
 
 def _hierarchical_cluster_consensus_matrix(consensus_matrix,

@@ -14,6 +14,7 @@ Authors:
 from colorsys import hsv_to_rgb, rgb_to_hsv
 from os.path import join
 
+import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.colorbar import ColorbarBase, make_axes
@@ -24,6 +25,7 @@ from numpy import (asarray, empty, linspace, ma, nansum, ndarray, ones, sqrt,
                    zeros, zeros_like)
 from pandas import DataFrame, Series, isnull, read_csv
 from scipy.spatial import ConvexHull, Delaunay
+from scipy.cluster.hierarchy import dendrogram, linkage
 from sklearn.svm import SVR
 
 from .. import RANDOM_SEED
@@ -405,7 +407,7 @@ def define_states(matrix,
         axis=1)
 
     # Hierarchical-consensus cluster
-    d, cs, ccc = hierarchical_consensus_cluster(
+    d, cs, ccc, hc = hierarchical_consensus_cluster(
         matrix,
         ks,
         distance_matrix=distance_matrix,
@@ -464,6 +466,20 @@ def define_states(matrix,
                 title='{} States'.format(k),
                 xlabel='Sample',
                 ylabel='Component')
+            plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
+
+            # plot hierarchical clustering
+            fig = plt.figure(figsize=(12, 12))
+            gs = GridSpec(
+                2, 2, height_ratios=[1, 8], width_ratios=[20, 1], hspace=0)
+            ax0 = plt.subplot(gs[0])
+            ax2 = plt.subplot(gs[2])
+            ax3 = plt.subplot(gs[3])
+            dend = dendrogram(
+                hc[k], ax=ax0, above_threshold_color='black', no_labels=True, color_threshold=1.5)
+            order = [int(i) for i in dend['ivl']]
+            sns.heatmap(d.iloc[order, order], cmap='RdBu', ax=ax2, cbar_ax=ax3)
+
             plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
     return d, cs, ccc
@@ -884,7 +900,7 @@ def make_oncogps(training_h,
         samples = samples.ix[samples_to_plot, :]
 
     print_log('Plotting ...')
-    _plot_onco_gps(
+    return _plot_onco_gps(
         components=components,
         samples=samples,
         state_grids=state_grids,
@@ -1645,6 +1661,7 @@ def _plot_onco_gps(
     if filepath:
         save_plot(filepath, format=format, dpi=dpi)
 
+    return samples
 
 def make_oncogps_in_3d(
         training_h,
