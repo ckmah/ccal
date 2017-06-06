@@ -14,15 +14,15 @@ Authors:
 from os.path import isfile
 
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.cm import Dark2, Paired, bwr
+from matplotlib.cm import bwr, gist_rainbow
 from matplotlib.colorbar import ColorbarBase, make_axes
 from matplotlib.colors import (ColorConverter, LinearSegmentedColormap,
                                ListedColormap, Normalize)
 from matplotlib.gridspec import GridSpec
-from matplotlib.pyplot import (figure, gca, plot, savefig, sca, subplot,
-                               suptitle, tight_layout)
-from numpy import array, isnan, unique
-from pandas import DataFrame, Series
+from matplotlib.pyplot import (figure, gca, savefig, sca, subplot, suptitle,
+                               tight_layout)
+from numpy import array, unique
+from pandas import DataFrame, Series, isnull
 from seaborn import (barplot, boxplot, clustermap, despine, distplot, heatmap,
                      set_style, violinplot)
 
@@ -30,23 +30,22 @@ from .d2 import get_dendrogram_leaf_indices, normalize_2d_or_1d
 from .file import establish_filepath
 
 # ==============================================================================
-# Parameter
+# Style
 # ==============================================================================
 FIGURE_SIZE = (16, 10)
 
 SPACING = 0.05
 
-# Fonts
-FONT_TITLE = {'fontsize': 26, 'weight': 'bold'}
-FONT_SUBTITLE = {'fontsize': 20, 'weight': 'bold'}
-FONT = {'fontsize': 12, 'weight': 'bold'}
+FONT_LARGEST = {'fontsize': 24, 'weight': 'bold', 'color': '#220530'}
+FONT_LARGER = {'fontsize': 20, 'weight': 'bold', 'color': '#220530'}
+FONT_STANDARD = {'fontsize': 16, 'weight': 'bold', 'color': '#220530'}
+FONT_SMALLER = {'fontsize': 12, 'weight': 'bold', 'color': '#220530'}
 
 # Color maps
 C_BAD = 'wheat'
 
 # Continuous 1
 CMAP_CONTINUOUS = bwr
-CMAP_CONTINUOUS.set_bad('yellow')
 CMAP_CONTINUOUS.set_bad(C_BAD)
 
 # Continuous 2
@@ -63,19 +62,18 @@ colordict = {
     'blue':
     tuple([(0.1 * i, r, r) for i, r in enumerate(reversed(reds))])
 }
-CMAP_ASSOCIATION = LinearSegmentedColormap('association', colordict)
-CMAP_ASSOCIATION.set_bad(C_BAD)
+CMAP_CONTINUOUS_ASSOCIATION = LinearSegmentedColormap('association', colordict)
+CMAP_CONTINUOUS_ASSOCIATION.set_bad(C_BAD)
 
 # Categorical
-CMAP_CATEGORICAL = Paired
-CMAP_CATEGORICAL_2 = Dark2
+CMAP_CATEGORICAL = gist_rainbow
 CMAP_CATEGORICAL.set_bad(C_BAD)
 
 # Binary
 CMAP_BINARY = ListedColormap(['#cdcdcd', '#404040'])
 CMAP_BINARY.set_bad(C_BAD)
 
-DPI = 100
+DPI = 300
 
 
 # ==============================================================================
@@ -86,8 +84,9 @@ def plot_points(*args,
                 xlabel='',
                 ylabel='',
                 filepath=None,
-                format='pdf',
+                file_extension='pdf',
                 dpi=DPI,
+                ax=None,
                 **kwargs):
     """
 
@@ -96,21 +95,27 @@ def plot_points(*args,
     :param xlabel:
     :param ylabel:
     :param filepath:
-    :param format:
+    :param file_extension:
     :param dpi:
     :param kwargs:
     :return: None
     """
 
-    if 'ax' not in kwargs:
+    if not ax:
         figure(figsize=FIGURE_SIZE)
+        ax = gca()
 
-    plot(* [list(a) for a in args], marker='o', **kwargs)
+    if 'linestyle' not in kwargs:
+        kwargs['linestyle'] = ''
+    if 'marker' not in kwargs:
+        kwargs['marker'] = '.'
+
+    ax.plot(*args, **kwargs)
 
     decorate(style='ticks', title=title, xlabel=xlabel, ylabel=ylabel)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=file_extension, dpi=dpi)
 
 
 def plot_distribution(a,
@@ -133,7 +138,7 @@ def plot_distribution(a,
                       xlabel='',
                       ylabel='Frequency',
                       filepath=None,
-                      format='pdf',
+                      file_extension='pdf',
                       dpi=DPI):
     """
 
@@ -157,7 +162,7 @@ def plot_distribution(a,
     :param xlabel:
     :param ylabel:
     :param filepath:
-    :param format:
+    :param file_extension:
     :param dpi:
     :return: None
     """
@@ -186,7 +191,7 @@ def plot_distribution(a,
     decorate(style='ticks', title=title, xlabel=xlabel, ylabel=ylabel)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=file_extension, dpi=dpi)
 
 
 def plot_violin_box_or_bar(x=None,
@@ -225,7 +230,7 @@ def plot_violin_box_or_bar(x=None,
                            xlabel=None,
                            ylabel=None,
                            filepath=None,
-                           format='pdf',
+                           file_extension='pdf',
                            dpi=DPI,
                            **kwargs):
     """
@@ -266,7 +271,7 @@ def plot_violin_box_or_bar(x=None,
     :param xlabel:
     :param ylabel:
     :param filepath:
-    :param format:
+    :param file_extension:
     :param dpi:
     :param kwargs:
     :return: None
@@ -285,7 +290,7 @@ def plot_violin_box_or_bar(x=None,
         palette = assign_colors_to_states(x, colors=colors)
 
     if len(set([v for v in y
-                if v and ~isnan(v)])) <= 2:  # Use barplot for binary
+                if v and ~isnull(v)])) <= 2:  # Use barplot for binary
         barplot(
             x=x,
             y=y,
@@ -355,7 +360,7 @@ def plot_violin_box_or_bar(x=None,
     decorate(style='ticks', title=title, xlabel=xlabel, ylabel=ylabel)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=file_extension, dpi=dpi)
 
 
 def plot_heatmap(dataframe,
@@ -373,9 +378,10 @@ def plot_heatmap(dataframe,
                  cbar_kws=None,
                  cbar_ax=None,
                  square=False,
-                 xticklabels=True,
-                 yticklabels=True,
+                 xticklabels=False,
+                 yticklabels=False,
                  mask=None,
+                 figure_size=FIGURE_SIZE,
                  data_type='continuous',
                  normalization_method=None,
                  normalization_axis=0,
@@ -390,8 +396,10 @@ def plot_heatmap(dataframe,
                  ylabel=None,
                  xlabel_rotation=0,
                  ylabel_rotation=90,
+                 xtick_rotation=90,
+                 ytick_rotation=0,
                  filepath=None,
-                 format='pdf',
+                 file_extension='pdf',
                  dpi=DPI,
                  **kwargs):
     """
@@ -414,6 +422,7 @@ def plot_heatmap(dataframe,
     :param xticklabels:
     :param yticklabels:
     :param mask:
+    :param figure_size:
     :param data_type:
     :param normalization_method:
     :param normalization_axis:
@@ -428,8 +437,10 @@ def plot_heatmap(dataframe,
     :param ylabel:
     :param xlabel_rotation:
     :param ylabel_rotation:
+    :param xtick_rotation:
+    :param ytick_rotation:
     :param filepath:
-    :param format:
+    :param file_extension:
     :param dpi:
     :param kwargs:
     :return: None
@@ -441,14 +452,13 @@ def plot_heatmap(dataframe,
         df = normalize_2d_or_1d(
             df, normalization_method,
             axis=normalization_axis).clip(-max_std, max_std)
-    values = unique(df.values)
 
     if len(row_annotation) or len(column_annotation):
         if len(row_annotation):
             if isinstance(row_annotation, Series):
                 row_annotation = row_annotation.copy()
-                if not len(row_annotation.index &
-                           df.index):  # Series but without proper index
+                if not len(row_annotation.index & df.index):  # Series
+                    # but without proper index
                     row_annotation.index = df.index
             else:
                 row_annotation = Series(row_annotation, index=df.index)
@@ -481,7 +491,7 @@ def plot_heatmap(dataframe,
         if isinstance(column_annotation, Series):
             column_annotation = column_annotation.iloc[column_indices]
 
-    figure(figsize=FIGURE_SIZE)
+    figure(figsize=figure_size)
 
     gridspec = GridSpec(10, 10)
 
@@ -505,8 +515,7 @@ def plot_heatmap(dataframe,
             cmap = CMAP_BINARY
         else:
             raise ValueError(
-                'Target data type must be one of {continuous, categorical, binary}.'
-            )
+                'Target data type must be continuous, categorical, or binary.')
 
     heatmap(
         df,
@@ -530,33 +539,51 @@ def plot_heatmap(dataframe,
         mask=mask,
         **kwargs)
 
+    # Get values for making legend
+    values = unique(df.values)
+    values = values[~isnull(values)]
     if data_type == 'continuous':  # Plot colorbar
+        # Get not-nan values for computing min, mean, & max
+        min_ = values.min()
+        mean_ = values.mean()
+        max_ = values.max()
         cax, kw = make_axes(
             ax_bottom,
             location='bottom',
             fraction=0.16,
-            cmap=CMAP_CONTINUOUS,
-            norm=Normalize(values.min(), values.max()),
-            ticks=[values.min(), values.mean(), values.max()])
+            cmap=cmap,
+            norm=Normalize(min_, max_),
+            ticks=[min_, mean_, max_])
         ColorbarBase(cax, **kw)
-        decorate(ax=cax)
+        decorate(ax=cax, xtick_rotation=90)
 
     elif data_type in ('categorical', 'binary'):  # Plot category legends
         if len(values) < 30:
             horizontal_span = ax_center.axis()[1]
-            vertival_span = ax_center.axis()[3]
+            vertical_span = ax_center.axis()[3]
+
+            colors = assign_colors_to_states(values, colors=cmap)
+
+            columns = df.columns.tolist()
+            if isinstance(columns[0], str):
+                max_len_c = max([len(c) for c in columns])
+            else:
+                max_len_c = 10
+            vertical_offset = 0.016 * max_len_c
+
             for i, v in enumerate(values):
                 x = (horizontal_span / len(values) / 2) + \
                     i * horizontal_span / len(values)
-                y = 0 - vertival_span * 0.09
+                y = 0 - vertical_span * vertical_offset
+                c = colors[v]
                 ax_center.plot(
-                    x, y, 'o', markersize=16, aa=True, clip_on=False)
+                    x, y, 'o', color=c, markersize=16, aa=True, clip_on=False)
                 ax_center.text(
                     x,
-                    y - vertival_span * 0.05,
+                    y - vertical_span * 0.05,
                     v,
                     horizontalalignment='center',
-                    **FONT)
+                    **FONT_STANDARD)
 
     decorate(
         title=title,
@@ -564,7 +591,8 @@ def plot_heatmap(dataframe,
         ylabel=ylabel,
         xlabel_rotation=xlabel_rotation,
         ylabel_rotation=ylabel_rotation,
-        max_xtick_size=10,
+        xtick_rotation=xtick_rotation,
+        ytick_rotation=ytick_rotation,
         ax=ax_center)
 
     if len(row_annotation):
@@ -597,17 +625,18 @@ def plot_heatmap(dataframe,
             cbar=False,
             xticklabels=False,
             yticklabels=False,
+            annot=True,
             cmap=cmap)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=file_extension, dpi=dpi)
 
 
-def plot_columns(df, title='Columns'):
+def plot_columns(df, figure_size=FIGURE_SIZE):
     """
     """
 
-    fig = figure(figsize=FIGURE_SIZE)
+    figure(figsize=figure_size)
 
     n_cols = df.shape[1]
 
@@ -626,11 +655,7 @@ def plot_columns(df, title='Columns'):
             ax=ax,
             cbar=False,
             cmap=CMAP_CONTINUOUS)
-        ax.set_title(c_n, **FONT_SUBTITLE)
-        if 0 < i:
-            ax.set_ylabel('')
-        else:
-            ax.set_ylabel(ax.get_ylabel(), **FONT_SUBTITLE)
+        decorate(ax=ax, ylabel=c_n)
     tight_layout()
 
     for i, (c_n, c) in enumerate(df.items()):
@@ -639,14 +664,13 @@ def plot_columns(df, title='Columns'):
         cax, kw = make_axes(
             ax,
             location='bottom',
+            fraction=0.1,
+            shrink=0.7,
             norm=Normalize(c.min(), c.max()),
-            ticks=[c.min(), c.max()],
+            ticks=[c.min(), c.mean(), c.max()],
             cmap=CMAP_CONTINUOUS)
         ColorbarBase(cax, **kw)
-        cax.set_xticklabels(
-            ['{0:.1e}'.format(v) for v in [c.min(), c.max()]],
-            rotation='vertical',
-            **FONT)
+        decorate(ax=cax, xtick_rotation=90)
 
 
 def plot_clustermap(dataframe,
@@ -672,7 +696,7 @@ def plot_clustermap(dataframe,
                     xticklabels=True,
                     yticklabels=True,
                     filepath=None,
-                    format='pdf',
+                    file_extension='pdf',
                     dpi=DPI,
                     **kwargs):
     """
@@ -700,7 +724,7 @@ def plot_clustermap(dataframe,
     :param xticklabels:
     :param yticklabels:
     :param filepath:
-    :param format:
+    :param file_extension:
     :param dpi:
     :param kwargs:
     :return: None
@@ -737,7 +761,7 @@ def plot_clustermap(dataframe,
     decorate(title=title, xlabel=xlabel, ylabel=ylabel, ax=ax_heatmap)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=file_extension, dpi=dpi)
 
 
 def plot_nmf(nmf_results=None,
@@ -746,18 +770,19 @@ def plot_nmf(nmf_results=None,
              h_matrix=None,
              max_std=3,
              pdf=None,
+             title_prefix='',
              filepath=None):
     """
-    Plot nmf_results dictionary (can be generated by ccal.machine_learning.matrix_decompose.nmf function).
+    Plot nmf_results dictionary (can be generated by
+    ccal.machine_learning.matrix_decompose.nmf function).
     :param nmf_results: dict; {k: {w:w, h:h, e:error}}
     :param k: int; k for NMF
     :param w_matrix: DataFrame
     :param h_matrix: DataFrame
     :param max_std: number; threshold to clip standardized values
     :param pdf: PdfPages;
+    :param title_prefix: str;
     :param filepath: str;
-    :param format:
-    :param dpi:
     :return: None
     """
 
@@ -768,8 +793,8 @@ def plot_nmf(nmf_results=None,
     elif not (isinstance(w_matrix, DataFrame) and isinstance(h_matrix,
                                                              DataFrame)):
         raise ValueError(
-            'Need either: 1) NMFCC result ({k: {w:w, h:h, e:error}) and k; or 2) W & H matrices.'
-        )
+            'Need either: 1) NMFCC result ({k: {w:w, h:h, e:error}) and k; or '
+            '2) W & H matrices.')
 
     # Initialize a PDF
     if pdf:  # Specified pdf will be closed by the caller
@@ -785,11 +810,14 @@ def plot_nmf(nmf_results=None,
     # Initialize a figure
     figure(figsize=FIGURE_SIZE)
 
+    if title_prefix:
+        title_prefix += ' '
+
     # Plot W matrix
     plot_heatmap(
         w_matrix,
         cluster=True,
-        title='W Matrix for k={}'.format(w_matrix.shape[1]),
+        title='{}W Matrix for k={}'.format(title_prefix, w_matrix.shape[1]),
         xlabel='Component',
         ylabel='Feature',
         yticklabels=False,
@@ -803,7 +831,7 @@ def plot_nmf(nmf_results=None,
     plot_heatmap(
         h_matrix,
         cluster=True,
-        title='H Matrix for k={}'.format(h_matrix.shape[0]),
+        title='{}H Matrix for k={}'.format(title_prefix, h_matrix.shape[0]),
         xlabel='Sample',
         ylabel='Component',
         xticklabels=False,
@@ -817,47 +845,67 @@ def plot_nmf(nmf_results=None,
         pdf.close()
 
 
-def assign_colors_to_states(states, colors=()):
+def assign_colors_to_states(states, colors=None):
     """
-    Assign colors to states
-    :param states: int or iterable; number of states or iterable of int representing state
-    :param colors:
+    Assign colors to states.
+    :param states: int or iterable; number of states or iterable of int
+    representing state
+    :param colors: iterable or matplotlib colormap;
     :return: dict; {state: color}
     """
-    # TODO: enable str states
 
-    if isinstance(states, int):  # Number of states
-        unique_states = range(1, states + 1)
-    elif any(states):  # Iterable of int representing state
-        unique_states = sorted(set(states))
+    if isinstance(states, int):  # Number of states: count from 1
+        unique_states = range(states)
+
+    elif len(states):  # Iterable of states
+
+        if not (isinstance(states[0], int) or isinstance(states[0], float)):
+            s_to_int = {}
+            int_to_s = {}
+            for i, s in enumerate(sorted(set(states))):
+                s_to_int[s] = i
+                int_to_s[i] = s
+            unique_states = range(len(set(states)))
+        else:
+            unique_states = sorted(set(states))
     else:
         raise ValueError('Error with states.')
 
+    # Make colors
     if isinstance(colors, ListedColormap) or isinstance(
             colors, LinearSegmentedColormap):  # Use given colormap
         colors = [colors(s) for s in unique_states]
-
-    elif len(colors):  # Use given colors to make a colormap
+    elif colors:  # Use given colors to make a colormap
         color_converter = ColorConverter()
         colors = [tuple(c) for c in color_converter.to_rgba_array(colors)]
-
     else:  # Use categorical colormap
         colors = [
             CMAP_CATEGORICAL(int(s / max(unique_states) * CMAP_CATEGORICAL.N))
             for s in unique_states
         ]
 
+    # Return state-to-color dict
     state_colors = {}
     for i, s in enumerate(unique_states):
+        if isinstance(states, int):
+            s += 1
+        try:
+            s = int_to_s[i]
+        except UnboundLocalError:
+            pass
+
         state_colors[s] = colors[i]
 
     return state_colors
 
 
-def decorate(style=None,
+def decorate(ax=None,
+             style=None,
              title=None,
+             title_kwargs=FONT_LARGEST,
              xlabel=None,
              ylabel=None,
+             label_kwargs=FONT_LARGER,
              xlabel_rotation=0,
              ylabel_rotation=90,
              xticks=None,
@@ -866,23 +914,28 @@ def decorate(style=None,
              max_n_yticks=50,
              max_xtick_size=None,
              max_ytick_size=None,
-             ax=None):
+             xtick_rotation=0,
+             ytick_rotation=90,
+             tick_kwargs=FONT_SMALLER):
     """
-
-    :param style: str;
-    :param title: str;
-    :param xlabel: str;
-    :param ylabel: str;
+    Decorate an ax (default ax is the current ax).
+    :param ax:
+    :param style:
+    :param title:
+    :param title_kwargs:
+    :param xlabel:
+    :param ylabel:
+    :param label_kwargs:
     :param xlabel_rotation:
     :param ylabel_rotation:
-    :param xticks: iterable;
-    :param yticks: iterable;
+    :param xticks:
+    :param yticks:
     :param max_n_xticks:
     :param max_n_yticks:
     :param max_xtick_size:
     :param max_ytick_size:
-    :param ax: Axes; sets the current ax to be ax
-    :return: None
+    :param tick_kwargs:
+    :return:
     """
 
     # Set ax
@@ -899,61 +952,53 @@ def decorate(style=None,
 
     # Title
     if title:
-        suptitle(title, **FONT_TITLE)
+        suptitle(title, **title_kwargs)
 
     # Label x axis
     if not xlabel:
         xlabel = ax.get_xlabel()
-    ax.set_xlabel(xlabel, rotation=xlabel_rotation, **FONT_SUBTITLE)
+    ax.set_xlabel(xlabel, rotation=xlabel_rotation, **label_kwargs)
 
     # Label y axis
     if not ylabel:
         ylabel = ax.get_ylabel()
-    ax.set_ylabel(ylabel, rotation=ylabel_rotation, **FONT_SUBTITLE)
+    ax.set_ylabel(ylabel, rotation=ylabel_rotation, **label_kwargs)
 
     # Label x ticks
     if not xticks:
         xticks = [t.get_text() for t in ax.get_xticklabels()]
-
-    if len(xticks):
+    if len(xticks):  # Adjust x ticks size
         if xticks[0] == '':
             xticks = ax.get_xticks()
-
-        # if isinstance(xticks[0], float):
-        #     xticks = ['{:.3f}'.format(t) for t in xticks]
 
         if max_n_xticks < len(xticks):
             xticks = []
 
         if max_xtick_size:
             xticks = [t[:max_xtick_size] for t in xticks]
-        ax.set_xticklabels(xticks, **FONT)
+        ax.set_xticklabels(xticks, rotation=xtick_rotation, **tick_kwargs)
 
     # Label y ticks
     if not yticks:
         yticks = [t.get_text() for t in ax.get_yticklabels()]
-
-    if len(yticks):
+    if len(yticks):  # Adjust y ticks size
         if yticks[0] == '':
             yticks = ax.get_yticks()
-
-        # if isinstance(yticks[0], float):
-        #     yticks = ['{:.3f}'.format(t) for t in yticks]
 
         if max_n_yticks < len(yticks):
             yticks = []
 
         if max_ytick_size:
             yticks = [t[:max_ytick_size] for t in yticks]
-        ax.set_yticklabels(yticks, **FONT)
+        ax.set_yticklabels(yticks, rotation=ytick_rotation, **tick_kwargs)
 
 
-def save_plot(filepath, overwrite=True, format='pdf', dpi=DPI):
+def save_plot(filepath, overwrite=True, file_extension='pdf', dpi=DPI):
     """
-    Establish filepath and save plot (default .pdf) at dpi resolution if filepath does not exists or overwrite is True.
+    Establish filepath and save plot.
     :param filepath: str;
     :param overwrite: bool;
-    :param format: str;
+    :param file_extension: str;
     :param dpi: int;
     :return: None
     """
@@ -961,4 +1006,4 @@ def save_plot(filepath, overwrite=True, format='pdf', dpi=DPI):
     if not isfile(filepath
                   ) or overwrite:  # If the figure doesn't exist or overwriting
         establish_filepath(filepath)
-        savefig(filepath, format=format, dpi=dpi, bbox_inches='tight')
+        savefig(filepath, format=file_extension, dpi=dpi, bbox_inches='tight')

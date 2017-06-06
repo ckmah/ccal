@@ -78,7 +78,23 @@ def establish_filepath(filepath):
     # Make missing directories
     for d in reversed(missing_directories):
         mkdir(d)
-        print('Created directory {}.'.format(d))
+        print('Created directory {}/.'.format(d))
+
+
+def mark_filename(filepath, mark):
+    """
+    Convert fname.extension to fname.mark.extension.
+    :param filepath: str;
+    :param mark: str;
+    :return: str;
+    """
+
+    prefix, extension = split_file_extension(filepath)
+    if mark.startswith('.'):
+        mark = mark[1:]
+    new_filepath = '{}.{}.{}'.format(prefix, mark, extension)
+    print('{} ==> {}.'.format(filepath, new_filepath))
+    return new_filepath
 
 
 def split_file_extension(filepath):
@@ -88,30 +104,9 @@ def split_file_extension(filepath):
     :return: str and str; filepath without compress suffix and the suffix
     """
 
-    split_filepath = filepath.split('.')
-    return ''.join(split_filepath[:-1]), split_filepath[-1]
-
-
-def mark_filename(filepath, mark, suffix):
-    """
-    Convert fname.suffix to fname.mark.suffix.
-    :param filepath: str;
-    :param mark: str;
-    :param suffix: str;
-    :return: str;
-    """
-
-    # Set up suffix to be added
-    if not suffix.startswith('.'):
-        suffix = '.{}'.format(suffix)
-
-    if suffix in filepath:  # suffix is found
-        i = filepath.find(suffix)
-        filepath = '{}.{}{}'.format(filepath[:i], mark, filepath[i:])
-    else:  # suffix is not found
-        filepath = '{}.{}{}'.format(filepath, mark, suffix)
-
-    return filepath
+    filepath = abspath(filepath)
+    i = filepath.rindex('.')
+    return filepath[:i], filepath[i + 1:]
 
 
 def write_dict(dict_, filepath, key_name, value_name):
@@ -346,7 +341,7 @@ def write_data_table(
 def read_gmts(filepaths,
               gene_sets=(),
               drop_description=True,
-              save_clean=True,
+              save_clean=False,
               collapse=False):
     """
     Read 1 or more GMTs.

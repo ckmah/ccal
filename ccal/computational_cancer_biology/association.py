@@ -33,9 +33,10 @@ from ..support.d2 import (get_top_and_bottom_indices, normalize_2d_or_1d,
 from ..support.file import establish_filepath
 from ..support.log import print_log
 from ..support.parallel_computing import parallelize
-from ..support.plot import (CMAP_ASSOCIATION, CMAP_BINARY, CMAP_CATEGORICAL,
-                            FIGURE_SIZE, FONT, FONT_SUBTITLE, FONT_TITLE,
-                            SPACING, plot_clustermap, save_plot)
+from ..support.plot import (CMAP_BINARY, CMAP_CATEGORICAL,
+                            CMAP_CONTINUOUS_ASSOCIATION, FIGURE_SIZE,
+                            FONT_LARGER, FONT_LARGEST, FONT_STANDARD, SPACING,
+                            plot_clustermap, save_plot)
 from ..support.str_ import title_str, untitle_str
 
 
@@ -88,7 +89,7 @@ def make_association_summary_panel(target,
     if not title:
         title = 'Association Summary Panel for {}'.format(
             title_str(target.name))
-    fig.suptitle(title, horizontalalignment='center', **FONT_TITLE)
+    fig.suptitle(title, horizontalalignment='center', **FONT_LARGEST)
     plot_annotation_header = True
 
     if not any(order):  # Sort alphabetically if order is not given
@@ -150,7 +151,7 @@ def make_association_summary_panel(target,
             title_ax.axis()[3] * 0.3,
             '{} (n={})'.format(title_str(features_name), len(shared)),
             horizontalalignment='center',
-            **FONT_SUBTITLE)
+            **FONT_LARGER)
 
         # Plot target
         heatmap(
@@ -163,7 +164,7 @@ def make_association_summary_panel(target,
             yticklabels=True,
             cbar=False)
         for t in target_ax.get_yticklabels():
-            t.set(rotation=0, **FONT)
+            t.set(rotation=0, **FONT_STANDARD)
 
         if plot_annotation_header:  # Plot header only for the 1st target axis
             target_ax.text(
@@ -171,7 +172,7 @@ def make_association_summary_panel(target,
                 target_ax.axis()[3] * 0.5,
                 ' ' * 1 + 'IC(\u0394)' + ' ' * 6 + 'P-val' + ' ' * 15 + 'FDR',
                 verticalalignment='center',
-                **FONT)
+                **FONT_STANDARD)
             plot_annotation_header = False
 
         # Plot features
@@ -184,7 +185,7 @@ def make_association_summary_panel(target,
             xticklabels=False,
             cbar=False)
         for t in features_ax.get_yticklabels():
-            t.set(rotation=0, **FONT)
+            t.set(rotation=0, **FONT_STANDARD)
 
         # Plot annotations
         for i, (a_i, a) in enumerate(annotations.iterrows()):
@@ -196,7 +197,7 @@ def make_association_summary_panel(target,
                 '{0:.3f}\t{1:.2e}\t{2:.2e}'.format(*a.ix[
                     ['score', 'p-value', 'fdr']]).expandtabs(),
                 verticalalignment='center',
-                **FONT)
+                **FONT_STANDARD)
 
         # Plot colorbar
         if r_i == n - 1:
@@ -217,7 +218,7 @@ def make_association_summary_panel(target,
                 cax.axis()[3] * -2.6,
                 'Standardized Profile for Target and Features',
                 horizontalalignment='center',
-                **FONT)
+                **FONT_STANDARD)
     # Save
     save_plot(filepath)
 
@@ -762,7 +763,7 @@ def _plot_association_panel(target,
 
     # Adjust target name
     for t in target_ax.get_yticklabels():
-        t.set(rotation=0, **FONT)
+        t.set(rotation=0, **FONT_STANDARD)
 
     if target_type in (
             'binary',
@@ -792,7 +793,7 @@ def _plot_association_panel(target,
                 target_ax.axis()[3] * (1 + SPACING),
                 unique_target_labels[i],
                 horizontalalignment='center',
-                **FONT)
+                **FONT_STANDARD)
 
     if title:  # Plot title
         target_ax.text(
@@ -800,7 +801,7 @@ def _plot_association_panel(target,
             target_ax.axis()[3] * 1.9,
             title,
             horizontalalignment='center',
-            **FONT_TITLE)
+            **FONT_LARGEST)
 
     # Plot annotation header
     target_ax.text(
@@ -808,7 +809,7 @@ def _plot_association_panel(target,
         target_ax.axis()[3] * 0.5,
         ' ' * 6 + 'IC(\u0394)' + ' ' * 12 + 'P-val' + ' ' * 14 + 'FDR',
         verticalalignment='center',
-        **FONT)
+        **FONT_STANDARD)
 
     # Plot features
     heatmap(
@@ -820,7 +821,7 @@ def _plot_association_panel(target,
         xticklabels=plot_colname,
         cbar=False)
     for t in features_ax.get_yticklabels():
-        t.set(rotation=0, **FONT)
+        t.set(rotation=0, **FONT_STANDARD)
 
     # Plot annotations
     for i, (a_i, a) in enumerate(annotations.iterrows()):
@@ -829,7 +830,7 @@ def _plot_association_panel(target,
             features_ax.axis()[3] - i - 0.5,
             '\t'.join(a.tolist()).expandtabs(),
             verticalalignment='center',
-            **FONT)
+            **FONT_STANDARD)
 
     # Save
     save_plot(filepath)
@@ -839,7 +840,7 @@ def _prepare_data_for_plotting(dataframe, data_type, max_std=3):
     if data_type == 'continuous':
         return normalize_2d_or_1d(
             dataframe, method='-0-',
-            axis=1), -max_std, max_std, CMAP_ASSOCIATION
+            axis=1), -max_std, max_std, CMAP_CONTINUOUS_ASSOCIATION
     elif data_type == 'categorical':
         return dataframe.copy(), 0, len(unique(dataframe)), CMAP_CATEGORICAL
     elif data_type == 'binary':

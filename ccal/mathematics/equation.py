@@ -11,7 +11,7 @@ Authors:
         Computational Cancer Analysis Laboratory, UCSD Cancer Center
 """
 
-from numpy import argmax, cumsum, empty, exp, log, sqrt
+from numpy import argmax, empty, exp, sqrt
 from scipy.special import stdtr
 from scipy.stats.distributions import t
 
@@ -43,36 +43,6 @@ def define_skew_t_pdf(x, df, shape, location, scale):
     return (2 / scale) * t._pdf((
         (x - location) / scale), df) * stdtr(df + 1, shape * (
             (x - location) / scale) * sqrt((df + 1) / (df + x**2)))
-
-
-def define_cumulative_area_ratio_function(f_1, f_2, x_grids, direction='+'):
-    """
-    Make a function from f1 and f2.
-    :param f_1: array-like;
-    :param f_2: array-like;
-    :param x_grids: array-like;
-    :param direction: str; {'+', '-'}
-    :return: array; array
-    """
-
-    d_x = x_grids[1] - x_grids[0]
-
-    # Compute d area
-    d_area_1 = f_1 / f_1.sum() * d_x
-    d_area_2 = f_2 / f_2.sum() * d_x
-
-    # Compute cumulative area
-    if direction == '+':  # Forward
-        c_area_1 = cumsum(d_area_1)
-        c_area_2 = cumsum(d_area_2)
-    elif direction == '-':  # Reverse
-        c_area_1 = cumsum(d_area_1[::-1])[::-1]
-        c_area_2 = cumsum(d_area_2[::-1])[::-1]
-    else:
-        raise ValueError('Unknown direction {}; choose from (\'+\', \'-\')'.
-                         format(direction))
-
-    return log(c_area_1 / c_area_2)
 
 
 def define_x_coordinates_for_reflection(function, x_grids):

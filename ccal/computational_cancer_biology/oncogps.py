@@ -21,9 +21,10 @@ from matplotlib.colorbar import ColorbarBase, make_axes
 from matplotlib.colors import Normalize
 from matplotlib.gridspec import GridSpec
 from matplotlib.path import Path
+from matplotlib.pyplot import figure, savefig, subplot
 from numpy import (asarray, empty, linspace, ma, nansum, ndarray, ones, sqrt,
                    zeros, zeros_like)
-from pandas import DataFrame, Series, isnull, read_csv
+from pandas import DataFrame, Series, isnull
 from scipy.spatial import ConvexHull, Delaunay
 from scipy.cluster.hierarchy import dendrogram, linkage
 from sklearn.svm import SVR
@@ -33,8 +34,6 @@ from ..machine_learning.classify import classify
 from ..machine_learning.cluster import (hierarchical_consensus_cluster,
                                         nmf_consensus_cluster)
 from ..machine_learning.fit import fit_matrix
-from ..machine_learning.matrix_decompose import \
-    save_and_plot_nmf_decompositions
 from ..machine_learning.multidimentional_scale import mds
 from ..machine_learning.score import compute_association_and_pvalue
 from ..machine_learning.solve import solve_matrix_linear_equation
@@ -42,13 +41,12 @@ from ..mathematics.equation import define_exponential_function
 from ..mathematics.information import EPS, bcv, information_coefficient, kde2d
 from ..support.d2 import (drop_na_2d, drop_uniform_slice_from_dataframe,
                           normalize_2d_or_1d)
-from ..support.file import (establish_filepath, load_gct, read_gct, write_dict,
-                            write_gct)
+from ..support.file import establish_filepath, load_gct, read_gct, write_gct
 from ..support.log import print_log
 from ..support.plot import (CMAP_BINARY, CMAP_CATEGORICAL, CMAP_CONTINUOUS,
                             DPI, FIGURE_SIZE, assign_colors_to_states,
-                            plot_heatmap, plot_nmf, plot_points, save_plot)
-from .association import make_association_panel
+                            decorate, plot_heatmap, plot_nmf, plot_points,
+                            save_plot)
 
 
 # ==============================================================================
@@ -57,33 +55,39 @@ from .association import make_association_panel
 def define_components(a_matrix,
                       ks,
                       directory_path,
+                      file_mark='',
                       how_to_drop_na_in_a_matrix='all',
-                      a_matrix_normalization_method='standardize',
+                      a_matrix_normalization_method='-0-_clip_shift',
+                      a_matrix_normalization_axis=0,
                       std_max=3,
                       n_jobs=1,
-                      n_clusterings=40,
-                      algorithm='Lee & Seung',
+                      n_clusterings=100,
+                      algorithm='Alternating Least Squares',
                       random_seed=RANDOM_SEED):
     """
-    NMF-consensus cluster samples (matrix columns) and compute cophenetic-correlation coefficients, and save 1 NMF
-    results for each k.
+    NMF-consensus cluster samples, compute cophenetic-correlation
+    coefficients, and save 1 NMF decomposition for each k.
 
-    :param a_matrix: DataFrame or str; (n_rows, n_columns), A matrix, or filepath to a .gct file
+    :param a_matrix: DataFrame or str; (n_rows, n_columns), A matrix,
+    or filepath to a GCT file
     :param ks: iterable or int; iterable of int k used for NMF
-    :param directory_path: str; directory path where
-                nmf_cc/cophenetic_correlation_coefficients{.pdf, .gct}
-                nmf_cc/nmf/nmf.pdf
-                nmf_cc/nmf/nmf_k{k}_{w, h}.gct
-            will be saved
+    :param directory_path: str; directory path where nmf_cc/nmf.pdf,
+    nmf_cc/nmf_k{k}_{w, h}.gct will be saved
+    :param file_mark: str;
     :param how_to_drop_na_in_a_matrix: str; {'all', 'any'}
-    :param a_matrix_normalization_method: str; {'standardize', 'rank'}
+    :param a_matrix_normalization_method: str; {'-0-_clip_shift', 'rank'}
     :param std_max: number;
     :param n_jobs: int;
     :param n_clusterings: int; number of NMF for consensus clustering
     :param algorithm: str; 'Alternating Least Squares' or 'Lee & Seung'
     :param random_seed: int;
-    :return: dict and dict; {k: {w: W matrix (n_rows, k), h: H matrix (k, n_columns), e: Reconstruction Error}} and
-                            {k: Cophenetic Correlation Coefficient}
+    :return: dict; {k: {
+                        w: W matrix (n_rows, k),
+                        h: H matrix (k, n_columns),
+                        e: Reconstruction Error,
+                        ccc: Cophenetic Correlation Coefficient
+                        }
+                    }
     """
 
     # Load A matrix
@@ -93,13 +97,11 @@ def define_components(a_matrix,
     a_matrix = drop_na_2d(a_matrix, how=how_to_drop_na_in_a_matrix)
 
     # Normaliza A matrix
-    a_matrix = normalize_a_matrix(
-        a_matrix,
-        a_matrix_normalization_method=a_matrix_normalization_method,
-        std_max=std_max)
+    a_matrix = normalize_a_matrix(a_matrix, a_matrix_normalization_method,
+                                  a_matrix_normalization_axis, std_max)
 
     # NMF-consensus cluster (while saving 1 NMF result per k)
-    nmfs, ccc = nmf_consensus_cluster(
+    nmfs = nmf_consensus_cluster(
         a_matrix,
         ks,
         n_jobs=n_jobs,
@@ -111,30 +113,27 @@ def define_components(a_matrix,
         nmf['w'].columns = ['C{}'.format(c) for c in range(1, k + 1)]
         nmf['h'].index = ['C{}'.format(c) for c in range(1, k + 1)]
 
-    # Save results in nmf/
-    directory_path = join(directory_path, 'nmf_cc/')
+    print_log('Saving & plotting ...')
+    directory_path = join(directory_path, 'nmf_cc{}/'.format(file_mark))
     establish_filepath(directory_path)
+    with PdfPages(join(directory_path, 'nmf.pdf')) as pdf:
+        plot_points(
+            sorted(nmfs.keys()), [nmfs[k]['ccc'] for k in sorted(nmfs.keys())],
+            title='NMF-CC Cophenetic-Correlation Coefficient vs. K',
+            xlabel='K',
+            ylabel='NMF-CC Cophenetic-Correlation Coefficient')
+        savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
-    print_log(
-        'Saving and plotting NMF-CC cophenetic-correlation coefficients and W & H matrices ...'
-    )
-    # Save and plot cophenetic correlation coefficients
-    write_dict(
-        ccc,
-        join(directory_path, 'cophenetic_correlation_coefficients.txt'),
-        key_name='K',
-        value_name='NMF-CC Cophenetic-Correlation Coefficient')
-    plot_points(
-        sorted(ccc.keys()), [ccc[k] for k in sorted(ccc.keys())],
-        title='NMF-CC Cophenetic-Correlation Coefficient vs. K',
-        xlabel='K',
-        ylabel='NMF-CC Cophenetic-Correlation Coefficient',
-        filepath=join(directory_path,
-                      'cophenetic_correlation_coefficients.pdf'))
-    # Save and plot NMF W & H matrices
-    save_and_plot_nmf_decompositions(nmfs, directory_path)
+        for k, nmf_ in nmfs.items():
+            print_log('\tK={} ...'.format(k))
+            write_gct(nmf_['w'],
+                      join(directory_path, 'nmf_k{}_w.gct'.format(k)))
+            write_gct(nmf_['h'],
+                      join(directory_path, 'nmf_k{}_h.gct'.format(k)))
 
-    return nmfs, ccc
+            plot_nmf(nmfs, k, pdf=pdf)
+
+    return nmfs
 
 
 def get_w_or_h_matrix(nmf_results, k, w_or_h):
@@ -157,20 +156,23 @@ def solve_for_components(w_matrix,
                          a_matrix,
                          w_matrix_normalization_method='sum',
                          how_to_drop_na_in_a_matrix='all',
-                         a_matrix_normalization_method='standardize',
+                         a_matrix_normalization_method='-0-_clip_shift',
+                         a_matrix_normalization_axis=0,
                          std_max=3,
                          method='nnls',
                          filepath_prefix=None):
     """
-    Get H matrix of a_matrix in the space of w_matrix by solving W * H = A for H.
+    Get H matrix of a_matrix in the space of w_matrix by solving W * H = A
+    for H.
     :param w_matrix: str or DataFrame; (n_rows, k)
     :param a_matrix: str or DataFrame; (n_rows, n_columns)
     :param w_matrix_normalization_method: str; {'sum'}
     :param how_to_drop_na_in_a_matrix: str; {'all', 'any'}
-    :param a_matrix_normalization_method: str; {'standardize', 'rank'}
+    :param a_matrix_normalization_method: str; {'-0-_clip_shift', 'rank'}
     :param std_max: number;
     :param method: str; {'nnls', 'pinv'}
-    :param filepath_prefix: str; filepath_prefix_solved_nmf_h_k{}.{gct, pdf} will be saved
+    :param filepath_prefix: str; filepath_prefix_solved_nmf_h_k{}.{gct,
+    pdf} will be saved
     :return: DataFrame; (k, n_columns)
     """
 
@@ -197,10 +199,8 @@ def solve_for_components(w_matrix,
         print_log('Not normalizing W matrix ...')
 
     # Normaliza A matrix
-    a_matrix = normalize_a_matrix(
-        a_matrix,
-        a_matrix_normalization_method=a_matrix_normalization_method,
-        std_max=std_max)
+    a_matrix = normalize_a_matrix(a_matrix, a_matrix_normalization_method,
+                                  a_matrix_normalization_axis, std_max)
 
     # Solve W * H = A
     print_log('Solving for components: W({}x{}) * H = A({}x{}) ...'.format(
@@ -210,8 +210,8 @@ def solve_for_components(w_matrix,
     if filepath_prefix:  # Save H matrix
         write_gct(h_matrix, filepath_prefix +
                   '_solved_nmf_h_k{}.gct'.format(h_matrix.shape[0]))
-        plot_filepath = filepath_prefix + \
-            '_solved_nmf_h_k{}.pdf'.format(h_matrix.shape[0])
+        plot_filepath = filepath_prefix + '_solved_nmf_h_k{}.pdf'.format(
+            h_matrix.shape[0])
     else:
         plot_filepath = None
 
@@ -220,28 +220,33 @@ def solve_for_components(w_matrix,
     return h_matrix
 
 
-def normalize_a_matrix(a_matrix,
-                       a_matrix_normalization_method='standardize',
-                       std_max=3):
-    """
+def normalize_a_matrix(a_matrix, a_matrix_normalization_method,
+                       a_matrix_normalization_axis, std_max):
     """
 
-    # Normaliza A matrix
-    if a_matrix_normalization_method == 'standardize':  # standardize A matrix by column
-        a_matrix = normalize_2d_or_1d(a_matrix, method='-0-', axis=0)
+    :param a_matrix:
+    :param a_matrix_normalization_method:
+    :param std_max:
+    :return:
+    """
+
+    # Normaliza A matrix columns
+    if a_matrix_normalization_method == '-0-_clip_shift':
+        a_matrix = normalize_2d_or_1d(
+            a_matrix, method='-0-', axis=a_matrix_normalization_axis)
         a_matrix = a_matrix.clip(lower=-std_max, upper=std_max)
         a_matrix += std_max
-    elif a_matrix_normalization_method == 'rank':  # Rank normalize A matrix by column
-        # TODO: try changing n_ranks or choose automatically
-        a_matrix = normalize_2d_or_1d(a_matrix, 'rank', n_ranks=10000, axis=0)
+    elif a_matrix_normalization_method == 'rank':
+        a_matrix = normalize_2d_or_1d(
+            a_matrix, 'rank', axis=a_matrix_normalization_axis)
     else:
-        print_log('Not normalizing A matrix ...')
+        print_log('Not normalizing A matrix columns ...')
 
     # Plot after normalization
     plot_heatmap(
         a_matrix,
-        title='Matrix to be Decomposed ({}-normalized columns)'.format(
-            a_matrix_normalization_method),
+        title='Matrix to be Decomposed ({} normalized by axis {})'.format(
+            a_matrix_normalization_method, a_matrix_normalization_axis),
         xlabel='Sample',
         ylabel='Feature',
         xticklabels=False,
@@ -251,155 +256,45 @@ def normalize_a_matrix(a_matrix,
     return a_matrix
 
 
-def select_features_and_nmf(testing,
-                            training,
-                            target,
-                            target_type='categorical',
-                            feature_scores=None,
-                            testing_name='Testing',
-                            training_name='Training',
-                            row_name='Feature',
-                            column_name='Sample',
-                            n_jobs=1,
-                            n_samplings=30,
-                            n_permutations=30,
-                            n_top_features=0.05,
-                            n_bottom_features=0.05,
-                            ks=(),
-                            n_clusterings=100,
-                            random_seed=RANDOM_SEED,
-                            directory_path=None,
-                            feature_scores_filename_prefix='feature_scores'):
-    """
-    Select features from training based on their association with target. Keep only those features from testing, and
-    perform NMF on testing, which has only the selected features.
-    :param testing: DataFrame;
-    :param training: DataFrame;
-    :param target: Series;
-    :param target_type: str;
-    :param feature_scores: DataFrame or str;
-    :param testing_name:
-    :param training_name:
-    :param row_name:
-    :param column_name:
-    :param n_jobs:
-    :param n_samplings:
-    :param n_permutations:
-    :param n_top_features:
-    :param n_bottom_features:
-    :param ks:
-    :param n_clusterings:
-    :param random_seed: int;
-    :param directory_path:
-    :param feature_scores_filename_prefix:
-    :return:
-    """
-
-    # Plot training
-    plot_heatmap(
-        training,
-        normalization_method='-0-',
-        normalization_axis=1,
-        column_annotation=target,
-        title=training_name,
-        xlabel=column_name,
-        ylabel=row_name,
-        yticklabels=False)
-
-    if not feature_scores:  # Compute feature scores
-        feature_scores = make_association_panel(
-            target,
-            training,
-            target_type=target_type,
-            n_jobs=n_jobs,
-            n_samplings=n_samplings,
-            n_permutations=n_permutations,
-            random_seed=random_seed,
-            filepath_prefix=join(directory_path,
-                                 feature_scores_filename_prefix))
-    else:  # Read feature scores from a file
-        if not isinstance(feature_scores, DataFrame):
-            feature_scores = read_csv(feature_scores, sep='\t', index_col=0)
-
-    # Select features
-    if n_top_features < 1:  # Fraction
-        n_top_features = n_top_features * feature_scores.shape[0]
-    if n_bottom_features < 1:  # Fraction
-        n_bottom_features = n_bottom_features * feature_scores.shape[0]
-    features = feature_scores.index[:n_top_features] | feature_scores.index[
-        -n_bottom_features:]
-
-    # Plot training with selected features
-    plot_heatmap(
-        training.ix[features, :],
-        normalization_method='-0-',
-        normalization_axis=1,
-        column_annotation=target,
-        title='{} with Selected {}s'.format(training_name, row_name),
-        xlabel=column_name,
-        ylabel=row_name,
-        yticklabels=False)
-
-    # Plot testing with selected features
-    testing = testing.ix[testing.index & features, :]
-    print_log('Selected {} testing features.'.format(testing.shape[0]))
-    plot_heatmap(
-        testing,
-        normalization_method='-0-',
-        normalization_axis=1,
-        title='{} with Selected {}'.format(testing_name, row_name),
-        xlabel=column_name,
-        ylabel=row_name,
-        xticklabels=False,
-        yticklabels=False)
-
-    # NMF
-    nmf_results, cophenetic_correlation_coefficients = define_components(
-        testing,
-        ks,
-        n_jobs=n_jobs,
-        n_clusterings=n_clusterings,
-        random_seed=random_seed,
-        directory_path=directory_path)
-
-    return nmf_results, cophenetic_correlation_coefficients
-
-
 # ==============================================================================
 # Define states
 # ==============================================================================
 def define_states(matrix,
                   ks,
                   directory_path,
+                  file_mark='',
+                  n_jobs=1,
                   distance_matrix=None,
                   max_std=3,
                   n_clusterings=40,
                   random_seed=RANDOM_SEED):
     """
-    Hierarchical-consensus cluster samples (matrix columns) and compute cophenetic correlation coefficients.
+    Hierarchical-consensus cluster samples (matrix columns) and compute
+    cophenetic correlation coefficients.
     :param matrix: DataFrame or str; (n_rows, n_columns); filepath to a .gct
     :param ks: iterable; iterable of int k used for hierarchical clustering
     :param directory_path: str; directory path where
-            clusterings/distance_matrix.txt
-            clusterings/clusterings.gct
-            clusterings/cophenetic_correlation_coefficients.txt
-            clusterings/clusterings.pdf
-        will be saved
-    :param distance_matrix: str or DataFrame; (n_columns, n_columns); distance matrix to hierarchical cluster
+    clusterings/distance_matrix.txt, clusterings/clusterings.gct,
+    clusterings/cophenetic_correlation_coefficients.txt,
+    clusterings/clusterings.pdf will be saved
+    :param file_mark: str;
+    :param n_jobs: int;
+    :param distance_matrix: str or DataFrame; (n_columns, n_columns);
+    distance matrix to hierarchical cluster
     :param max_std: number; threshold to clip standardized values
-    :param n_clusterings: int; number of hierarchical clusterings for consensus clustering
+    :param n_clusterings: int; number of hierarchical clusterings for
+    consensus clustering
     :param random_seed: int;
-    :return: DataFrame, DataFrame, and Series;
-        distance_matrix (n_samples, n_samples),
-        clusterings (n_ks, n_columns), and
-        cophenetic correlation coefficients (n_ks)
-        d, c, ccc = define_states(...)
+    :return: DataFrame, DataFrame, and Series; distance_matrix (n_samples,
+    n_samples), clusterings (n_ks, n_columns), and cophenetic correlation
+    coefficients (n_ks); d, cs, cccs = define_states(...)
     """
 
     if isinstance(matrix, str):  # Read form a .gct file
         matrix = read_gct(matrix)
 
-    # '-0-' normalize by rows and clip values max_std standard deviation away; then '0-1' normalize by rows
+    # '-0-' normalize by rows and clip values max_std standard deviation
+    # away; then '0-1' normalize by rows
     matrix = normalize_2d_or_1d(
         normalize_2d_or_1d(matrix, '-0-',
                            axis=1).clip(lower=-max_std, upper=max_std),
@@ -410,22 +305,21 @@ def define_states(matrix,
     d, cs, ccc, hc = hierarchical_consensus_cluster(
         matrix,
         ks,
-        distance_matrix=distance_matrix,
+        n_jobs=n_jobs,
+        d=distance_matrix,
         n_clusterings=n_clusterings,
         random_seed=random_seed)
 
-    # Save and plot distance matrix, clusterings, and cophenetic correlation
-    # coefficients
-    directory_path = join(directory_path, 'clusterings/')
+    # Save & plot distance matrix, clusterings, and
+    # cophenetic correlation coefficients
+    print_log('Saving & plotting ...')
+
+    directory_path = join(directory_path, 'clusterings{}/'.format(file_mark))
     establish_filepath(directory_path)
 
     d.to_csv(join(directory_path, 'distance_matrix.txt'), sep='\t')
+
     write_gct(cs, join(directory_path, 'clusterings.gct'))
-    write_dict(
-        ccc,
-        join(directory_path, 'cophenetic_correlation_coefficients.txt'),
-        key_name='K',
-        value_name='Cophenetic Correlation Coefficient')
 
     with PdfPages(join(directory_path, 'clusterings.pdf')) as pdf:
         # Plot distance matrix
@@ -437,7 +331,7 @@ def define_states(matrix,
             ylabel='Sample',
             xticklabels=False,
             yticklabels=False)
-        plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
+        savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
         # Plot clusterings
         plot_heatmap(
@@ -446,15 +340,15 @@ def define_states(matrix,
             data_type='categorical',
             title='Clustering per K',
             xticklabels=False)
-        plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
+        savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
         # Plot cophenetic correlation coefficients
         plot_points(
-            sorted(ccc.keys()), [ccc[k] for k in sorted(ccc.keys())],
+            sorted(cccs.keys()), [cccs[k] for k in sorted(cccs.keys())],
             title='Clustering Cophenetic-Correlation Coefficients vs. K',
             xlabel='K',
             ylabel='Cophenetic-Correlation Coefficients')
-        plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
+        savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
         #
         for k in ks:
@@ -465,8 +359,9 @@ def define_states(matrix,
                 normalization_axis=1,
                 title='{} States'.format(k),
                 xlabel='Sample',
-                ylabel='Component')
-            plt.savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
+                ylabel='Component',
+                xticklabels=False)
+            savefig(pdf, format='pdf', dpi=DPI, bbox_inches='tight')
 
             # plot hierarchical clustering
             fig = plt.figure(figsize=(12, 12))
@@ -518,11 +413,13 @@ def make_oncogps(training_h,
                  training_annotation=(),
                  testing_annotation=(),
                  annotation_name='',
-                 annotation_type='continuous',
-                 annotation_ascending=True,
+                 annotation_type=None,
+                 normalize_annotation=True,
+                 annotation_scale='std',
                  highlight_high_magnitude=True,
-                 annotate_background=False,
+                 annotation_ascending=True,
                  plot_samples_with_missing_annotation=False,
+                 annotate_background=False,
                  title='Onco-GPS Map',
                  title_fontsize=26,
                  title_fontcolor='#3326C0',
@@ -535,13 +432,13 @@ def make_oncogps(training_h,
                  component_markeredgecolor='#FFFFFF',
                  component_names=(),
                  component_fontsize=26,
-                 delaunay_linewidth=0.7,
-                 delaunay_linecolor='#000000',
+                 delaunay_linewidth=1,
+                 delaunay_linecolor='#220530',
                  state_colors=(),
                  bad_color='#000000',
                  background_alpha_factor=1,
                  n_contours=26,
-                 contour_linewidths=0.60,
+                 contour_linewidth=0.60,
                  contour_linecolor='#262626',
                  contour_alpha=0.8,
                  state_boundary_color=None,
@@ -553,40 +450,58 @@ def make_oncogps(training_h,
                  legend_markersize=16,
                  legend_fontsize=16,
                  filepath=None,
-                 format='pdf',
+                 extension='pdf',
                  dpi=DPI):
     """
+
     :param training_h: DataFrame; (n_nmf_component, n_samples); NMF H matrix
     :param training_states: iterable of int; (n_samples); sample states
     :param std_max: number; threshold to clip standardized values
 
-    :param testing_h: pandas DataFrame; (n_nmf_component, n_samples); NMF H matrix
-    :param testing_states: iterable of int; (n_samples); sample states
-    :param testing_h_normalization: str or None; {'using_training_h', 'using_testing_h', None}
+    :param testing_h: pandas DataFrame; (n_nmf_component, n_samples);
+        NMF H matrix
+    :param testing_h_normalization: str or None; {'using_training_h',
+        'using_testing_h', None}
 
-    :param components: DataFrame; (n_components, 2 [x, y]); component coordinates
+    :param components: DataFrame; (n_components, 2 [x, y]); component
+    coordinates
     :param equilateral: bool;
-    :param informational_mds: bool; use informational MDS or not
-    :param mds_seed: int; random seed for setting the coordinates of the multidimensional scaling
 
-    :param n_pulls: int; [1, n_components]; number of components influencing a sample's coordinate
-    :param power: str or number; power to raise components' influence on each sample
+    :param informational_mds: bool; use informational MDS or not
+    :param mds_seed: int; random seed for setting the coordinates of the
+    multidimensional scaling
+
+    :param n_pulls: int; [1, n_components]; number of components influencing
+    a sample's coordinate
+    :param power: str or number; power to raise components' influence on each
+    sample
     :param fit_min: number;
     :param fit_max: number;
     :param power_min: number;
     :param power_max: number;
 
-    :param n_grids: int; number of grids; larger the n_grids, higher the resolution
-    :param kde_bandwidths_factor: number; factor to multiply KDE bandwidths
+    :param n_grids: int; number of grids; larger the n_grids, higher the
+    resolution
+    :param kde_bandwidth_factor: number; factor to multiply KDE bandwidths
 
-    :param samples_to_plot: indexer; (n_training_samples), (n_testing_samples), or (n_sample_indices)
+    :param samples_to_plot: indexer; (n_training_samples),
+    (n_testing_samples), or (n_sample_indices)
     :param component_ratio: number; number if int; percentile if float & < 1
+    :param training_annotation:
+    :param testing_annotation:
 
-    :param annotation: pandas Series; (n_samples); sample annotation; will color samples based on annotation
+    :param testing_annotation: pandas Series; (n_samples); sample annotation;
+    will
+    color samples based on annotation
     :param annotation_name: str;
-    :param annotation_type: str; {'continuous', 'categorical', 'binary'}
-    :param annotation_ascending: bool;
+    :param annotation_type: str;
+    :param normalize_annotation: bool;
+    :param annotation_scale: str; {'std', 'relative'}
     :param highlight_high_magnitude: bool;
+    :param annotation_ascending: bool;
+    :param plot_samples_with_missing_annotation: bool;
+
+    :param annotate_background: bool;
 
     :param title: str;
     :param title_fontsize: number;
@@ -606,33 +521,39 @@ def make_oncogps(training_h,
     :param delaunay_linewidth: number;
     :param delaunay_linecolor: matplotlib color;
 
-    :param colors: matplotlib.colors.ListedColormap, matplotlib.colors.LinearSegmentedColormap, or iterable;
+    :param state_colors: matplotlib.colors.ListedColormap,
+    matplotlib.colors.LinearSegmentedColormap, or iterable;
     :param bad_color: matplotlib color;
-    :param max_background_saturation: float; [0, 1]
+    :param background_alpha_factor: float; [0, 1]
 
     :param n_contours: int; set to 0 to disable drawing contours
     :param contour_linewidth: number;
     :param contour_linecolor: matplotlib color;
     :param contour_alpha: float; [0, 1]
+    :param state_boundary_color: matplotlib color;
 
     :param sample_markersize: number;
     :param sample_markeredgewidth: number;
     :param sample_markeredgecolor: matplotlib color;
-    :param sample_name_size: number;
+    :param sample_name_fontsize: number;
     :param sample_name_color: matplotlib color; not plotting sample if None
 
     :param legend_markersize: number;
     :param legend_fontsize: number;
 
     :param filepath: str;
-    :param format: str;
+    :param extension: str;
     :param dpi: number;
+
+    :return: None
     """
+
     # ==========================================================================
     # Process training H matrix
     #   Set H matrix's indices to be str (better for .ix)
     #   Drop samples with all-0 values before normalization
-    #   Normalize H matrix (May save normalizing parameters for normalizing testing H matrix later)
+    #   Normalize H matrix (May save normalizing parameters for normalizing
+    # testing H matrix later)
     #       -0- normalize
     #       Clip values over 3 standard deviation
     #       0-1 normalize
@@ -669,7 +590,8 @@ def make_oncogps(training_h,
 
     # ==========================================================================
     # Get training component coordinates
-    #   If there are 3 components and equilateral == True, then use equilateral-triangle component coordinates;
+    #   If there are 3 components and equilateral == True, then use
+    # equilateral-triangle component coordinates;
     #   else if component coordinates are specified, use them;
     #   else, compute component coordinates using Newton's Laws
     # ==========================================================================
@@ -689,8 +611,8 @@ def make_oncogps(training_h,
     else:
         if informational_mds:
             print_log(
-                'Computing component coordinates using informational distance ...'
-            )
+                'Computing component coordinates using informational distance '
+                '...')
             dissimilarity = information_coefficient
         else:
             print_log(
@@ -706,7 +628,8 @@ def make_oncogps(training_h,
     # ==========================================================================
     # Get training component power
     #   If n_pulls is not specified, all components pull a sample
-    #   If power is not specified, compute component power by fitting (power will be 1 if fitting fails)
+    #   If power is not specified, compute component power by fitting (power
+    # will be 1 if fitting fails)
     # ==========================================================================
     if not n_pulls:
         n_pulls = training_h.shape[0]
@@ -724,8 +647,8 @@ def make_oncogps(training_h,
             except RuntimeError as e:
                 power = 1
                 print_log(
-                    '\tCould\'t model with Ae^(kx) + C; {}; set power to be 1.'.
-                    format(e))
+                    '\tCould\'t model with Ae^(kx) + C; {}; set power to be '
+                    '1.'.format(e))
 
     # ==========================================================================
     # Compute training sample coordinates
@@ -738,9 +661,9 @@ def make_oncogps(training_h,
         columns=['x', 'y', 'state', 'component_ratio', 'annotation'])
 
     print_log(
-        'Computing training sample coordinates using {} components and {:.3f} power ...'.
-        format(n_pulls, power))
-    training_samples.ix[:, ['x', 'y']] = _compute_sample_coordinates(
+        'Computing training sample coordinates using {} components and {:.3f} '
+        'power ...'.format(n_pulls, power))
+    training_samples[['x', 'y']] = _compute_sample_coordinates(
         components, training_h, n_pulls, power)
 
     training_samples.ix[:, 'state'] = Series(
@@ -751,15 +674,16 @@ def make_oncogps(training_h,
     # ==========================================================================
     if component_ratio and 0 < component_ratio:
         print_log('Computing training component ratios ...')
-        training_samples.ix[:, 'component_ratio'] = _compute_component_ratios(
+        training_samples['component_ratio'] = _compute_component_ratios(
             training_h, component_ratio)
 
     # ==========================================================================
     # Compute grid probabilities and states
     # ==========================================================================
     print_log('Computing state grids and probabilities ...')
-    state_grids, state_grids_probabilities = _compute_state_grids_and_probabilities(
-        training_samples, n_grids, kde_bandwidth_factor)
+    state_grids, state_grids_probabilities = \
+        _compute_state_grids_and_probabilities(
+            training_samples, n_grids, kde_bandwidth_factor)
     # ==========================================================================
     # Process training annotation
     # ==========================================================================
@@ -770,18 +694,19 @@ def make_oncogps(training_h,
         # Keep only samples in H matrix
         # ======================================================================
         if isinstance(training_annotation, Series):
-            training_samples.ix[:, 'annotation'] = training_annotation.ix[
+            training_samples['annotation'] = training_annotation.ix[
                 training_samples.index]
         elif len(training_annotation):
-            training_samples.ix[:, 'annotation'] = training_annotation
+            training_samples['annotation'] = training_annotation
 
         # ======================================================================
         # Compute grid probabilities and annotation states
         # ======================================================================
         if annotate_background:
             print_log('Computing annotation grids and probabilities ...')
-            annotation_grids, annotation_grids_probabilities = _compute_annotation_grids_and_probabilities(
-                training_samples, training_annotation, n_grids)
+            annotation_grids, annotation_grids_probabilities = \
+                _compute_annotation_grids_and_probabilities(
+                    training_samples, training_annotation, n_grids)
 
     # ==========================================================================
     # Process testing data
@@ -791,13 +716,15 @@ def make_oncogps(training_h,
         # Process testing H matrix
         #   Set H matrix's indices to be str (better for .ix)
         #   Drop samples with all-0 values before normalization
-        #   Normalize H matrix (may use the normalizing parameters used in normalizing training H matrix)
+        #   Normalize H matrix (may use the normalizing parameters used in
+        # normalizing training H matrix)
         #       -0- normalize
         #       Clip values over 3 standard deviation
         #       0-1 normalize
         #   Drop samples with all-0 values after normalization
         # ======================================================================
         if testing_h_normalization:
+            # TODO: fix passing of normalizing_
             testing_h = drop_uniform_slice_from_dataframe(testing_h, 0)
 
             testing_h = normalize_2d_or_1d(
@@ -829,8 +756,8 @@ def make_oncogps(training_h,
             columns=['x', 'y', 'state', 'component_ratio', 'annotation'])
 
         print_log(
-            'Computing testing sample coordinates using {} components and {:.3f} power ...'.
-            format(n_pulls, power))
+            'Computing testing sample coordinates with {} components & {:.3f} '
+            'power ...'.format(n_pulls, power))
         testing_samples.ix[:, ['x', 'y']] = _compute_sample_coordinates(
             components, testing_h, n_pulls, power)
 
@@ -842,12 +769,16 @@ def make_oncogps(training_h,
         #     print('No normalization.')
         #     print(training_h_initial.T.head())
         #     print(testing_h.T.head())
-        #     testing_samples.ix[:, 'state'] = classify(training_h_initial.T, training_states, testing_h.T)
+        #     testing_samples.ix[:, 'state'] = classify(training_h_initial.T,
+        #  training_states, testing_h.T)
         # else:
         #     print('Yes normalization.')
         #     print(training_h.T.head())
         #     print(testing_h.T.head())
-        #     testing_samples.ix[:, 'state'] = classify(training_h.T, training_states, testing_h.T)
+        #     testing_samples.ix[:, 'state'] = classify(training_h.T,
+        # training_states, testing_h.T)
+        testing_samples.ix[:, 'state'].T.to_csv(
+            '{}.testing_states.txt'.format(filepath), sep='\t')
 
         # ======================================================================
         # Compute training component ratios
@@ -883,16 +814,6 @@ def make_oncogps(training_h,
         samples = training_samples
 
     # ==========================================================================
-    # Guess annotation data type
-    # ==========================================================================
-    if annotation_type == 'continuous' and samples.ix[:,
-                                                      'annotation'].dtypes == 'object':
-        if samples.ix[:, 'annotation'].dropna().unique().size <= 2:
-            annotation_type = 'binary'
-        else:
-            annotation_type = 'categorical'
-
-    # ==========================================================================
     # Limit samples to plot
     # Plot Onco-GPS
     # ==========================================================================
@@ -908,6 +829,8 @@ def make_oncogps(training_h,
         n_training_states=training_states.unique().size,
         annotation_name=annotation_name,
         annotation_type=annotation_type,
+        normalize_annotation=normalize_annotation,
+        annotation_scale=annotation_scale,
         annotation_ascending=annotation_ascending,
         highlight_high_magnitude=highlight_high_magnitude,
         plot_samples_with_missing_annotation=plot_samples_with_missing_annotation,
@@ -932,7 +855,7 @@ def make_oncogps(training_h,
         bad_color=bad_color,
         background_alpha_factor=background_alpha_factor,
         n_contours=n_contours,
-        contour_linewidth=contour_linewidths,
+        contour_linewidth=contour_linewidth,
         contour_linecolor=contour_linecolor,
         contour_alpha=contour_alpha,
         state_boundary_color=state_boundary_color,
@@ -944,13 +867,14 @@ def make_oncogps(training_h,
         legend_markersize=legend_markersize,
         legend_fontsize=legend_fontsize,
         filepath=filepath,
-        format=format,
+        format=extension,
         dpi=dpi)
 
 
 def _compute_component_power(h, fit_min, fit_max, power_min, power_max):
     """
-    Compute component power by fitting component magnitudes of samples to the exponential function.
+    Compute component power by fitting component magnitudes of samples to the
+    exponential function.
     :param h: DataFrame;
     :param fit_min: number;
     :param fit_max: number;
@@ -973,10 +897,12 @@ def _compute_component_power(h, fit_min, fit_max, power_min, power_max):
 def _compute_sample_coordinates(component_x_coordinates, component_x_samples,
                                 n_influencing_components, power):
     """
-    Compute sample coordinates based on component coordinates (components pull samples).
+    Compute sample coordinates based on component coordinates (components
+    pull samples).
     :param component_x_coordinates: DataFrame; (n_points, n_dimensions)
     :param component_x_samples: DataFrame; (n_points, n_samples)
-    :param n_influencing_components: int; [1, n_components]; number of components pulling a sample
+    :param n_influencing_components: int; [1, n_components]; number of
+    components pulling a sample
     :param power: number; power to raise components' pull power
     :return: DataFrame; (n_samples, n_dimension); sample_coordinates
     """
@@ -1007,7 +933,8 @@ def _compute_sample_coordinates(component_x_coordinates, component_x_samples,
 
 def _compute_component_ratios(h, n):
     """
-    Compute the ratio between the sum of the top-n component values and the sum of the rest of the component values.
+    Compute the ratio between the sum of the top-n component values and the
+    sum of the rest of the component values.
     :param h: DataFrame;
     :param n: number;
     :return: array; ratios
@@ -1131,10 +1058,10 @@ def _compute_annotation_grids_and_probabilities(samples,
 def _plot_onco_gps(
         components, samples, state_grids, state_grids_probabilities,
         n_training_states, annotation_name, annotation_type,
-        annotation_ascending, highlight_high_magnitude,
-        plot_samples_with_missing_annotation, annotation_grids,
-        annotation_grids_probabilities, std_max, title, title_fontsize,
-        title_fontcolor, subtitle_fontsize, subtitle_fontcolor,
+        normalize_annotation, annotation_scale, annotation_ascending,
+        highlight_high_magnitude, plot_samples_with_missing_annotation,
+        annotation_grids, annotation_grids_probabilities, std_max, title,
+        title_fontsize, title_fontcolor, subtitle_fontsize, subtitle_fontcolor,
         component_marker, component_markersize, component_markerfacecolor,
         component_markeredgewidth, component_markeredgecolor, component_names,
         component_fontsize, delaunay_linewidth, delaunay_linecolor, colors,
@@ -1153,7 +1080,9 @@ def _plot_onco_gps(
     :param n_training_states: int; number of training-sample states
 
     :param annotation_name: str;
-    :param annotation_type: str; {'continuous', 'categorical', 'binary'}
+    :param annotation_type: str;
+    :param normalize_annotation: bool;
+    :param annotation_scale: str; {'std', 'relative'}
     :param annotation_ascending: logical True or False
     :param highlight_high_magnitude: bool;
 
@@ -1180,7 +1109,8 @@ def _plot_onco_gps(
     :param delaunay_linewidth: number;
     :param delaunay_linecolor: matplotlib color;
 
-    :param colors: matplotlib.colors.ListedColormap, matplotlib.colors.LinearSegmentedColormap, or iterable;
+    :param colors: matplotlib.colors.ListedColormap,
+    matplotlib.colors.LinearSegmentedColormap, or iterable;
     :param bad_color: matplotlib color;
     :param background_alpha_factor: float; [0, 1]
 
@@ -1189,13 +1119,15 @@ def _plot_onco_gps(
     :param contour_linecolor: matplotlib color;
     :param contour_alpha: float; [0, 1]
 
-    :param state_boundary_color: tuple; (r, g, b) where each color is between 0 and 1
+    :param state_boundary_color: tuple; (r, g, b) where each color is between
+    0 and 1
 
     :param sample_markersize: number;
     :param sample_markeredgewidth: number;
     :param sample_markeredgecolor: matplotlib color;
     :param sample_name_size: number;
-    :param sample_name_color: None or matplotlib color; not plotting sample if None
+    :param sample_name_color: None or matplotlib color; not plotting sample
+    if None
 
     :param legend_markersize: number;
     :param legend_fontsize: number;
@@ -1208,21 +1140,21 @@ def _plot_onco_gps(
     """
 
     # Set up figure
-    plt.figure(figsize=FIGURE_SIZE)
+    figure(figsize=FIGURE_SIZE)
     gridspec = GridSpec(10, 16)
 
     # Set up title ax
-    ax_title = plt.subplot(gridspec[0, :])
+    ax_title = subplot(gridspec[0, :])
     ax_title.axis([0, 1, 0, 1])
     ax_title.axis('off')
 
     # Set up map ax
-    ax_map = plt.subplot(gridspec[0:, :12])
+    ax_map = subplot(gridspec[0:, :12])
     ax_map.axis([0, 1, 0, 1])
     ax_map.axis('off')
 
     # Set up legend ax
-    ax_legend = plt.subplot(gridspec[1:, 14:])
+    ax_legend = subplot(gridspec[1:, 14:])
     ax_legend.axis([0, 1, 0, 1])
     ax_legend.axis('off')
 
@@ -1264,7 +1196,7 @@ def _plot_onco_gps(
     convexhull_region = Path(convexhull.points[convexhull.vertices])
 
     # Plot component labels
-    if any(component_names):
+    if len(component_names):
         components.index = component_names
     for i in components.index:
         # Get components' x & y coordinates
@@ -1327,7 +1259,8 @@ def _plot_onco_gps(
 
         grid_probabilities_min = grids_probabilities.min()
         grid_probabilities_max = grids_probabilities.max()
-        grid_probabilities_range = grid_probabilities_max - grid_probabilities_min
+        grid_probabilities_range = grid_probabilities_max - \
+                                   grid_probabilities_min
 
         for i in range(grids.shape[0]):
             for j in range(grids.shape[1]):
@@ -1339,16 +1272,15 @@ def _plot_onco_gps(
                     else:
                         c = (0, 0, 1)
                     hsv = rgb_to_hsv(*c)
-                    a = (grids_probabilities[i, j] - grid_probabilities_min
+                    o = (grids_probabilities[i, j] - grid_probabilities_min
                          ) / grid_probabilities_range
                     image[j, i] = hsv_to_rgb(hsv[0],
-                                             min(a * background_alpha_factor,
-                                                 1), hsv[2] * a + (1 - a))
+                                             min(o * background_alpha_factor,
+                                                 1), hsv[2] * o + (1 - o))
 
         grids = state_grids
 
-        # Plot soft contours for each state (masking points outside of
-        # Onco-GPS)
+        # Plot soft contours for each state (masking points outside of Onco-GPS)
         for s in range(1, n_training_states + 1):
             mask = zeros_like(grids, dtype=bool)
             for i in range(grids.shape[0]):
@@ -1400,7 +1332,8 @@ def _plot_onco_gps(
 
         grid_probabilities_min = grids_probabilities.min()
         grid_probabilities_max = grids_probabilities.max()
-        grid_probabilities_range = grid_probabilities_max - grid_probabilities_min
+        grid_probabilities_range = grid_probabilities_max - \
+                                   grid_probabilities_min
 
         for i in range(grids.shape[0]):
             for j in range(grids.shape[1]):
@@ -1408,11 +1341,11 @@ def _plot_onco_gps(
                 if convexhull_region.contains_point(
                     (fraction_grids[i], fraction_grids[j])):
                     hsv = rgb_to_hsv(*state_colors[grids[i, j]][:3])
-                    a = (grids_probabilities[i, j] - grid_probabilities_min
+                    o = (grids_probabilities[i, j] - grid_probabilities_min
                          ) / grid_probabilities_range
                     image[j, i] = hsv_to_rgb(hsv[0],
-                                             min(a * background_alpha_factor,
-                                                 1), hsv[2] * a + (1 - a))
+                                             min(o * background_alpha_factor,
+                                                 1), hsv[2] * o + (1 - o))
         ax_map.imshow(
             image,
             interpolation=None,
@@ -1467,84 +1400,83 @@ def _plot_onco_gps(
             verticalalignment='center')
 
     if not samples.ix[:, 'annotation'].isnull().all():
-        # Plot samples, annotation, sample legends, and annotation legends
+        try:
+            o_to_i = None
 
-        # Set up annotation min, mean, max, colormap, and range
-        if annotation_type == 'continuous':
-            # TODO: refactor
-            # if samples.ix[:, 'annotation'].dtype == object:
-            #     raise TypeError(
-            #         'Continuous annotation values must be numbers (float, int, etc).')
-            # Normalize annotation
-            samples.ix[:, 'annotation_for_plot'] = \
-                normalize_2d_or_1d(
-                    samples.ix[:, 'annotation'], '-0-').clip(lower=-std_max, upper=std_max)
-            # Get annotation statistics
-            annotation_min = -std_max
-            annotation_mean = samples.ix[:, 'annotation_for_plot'].mean()
-            annotation_max = std_max
-            # Set color map
-            cmap = CMAP_CONTINUOUS
-        else:  # Annotation is categorical or binary
-            if samples.ix[:,
-                          'annotation'].dtype == object:  # Convert str annotation to value
-                a_to_value = {}
-                value_to_a = {}
-                # Map str to int
-                for a_i, a in enumerate(samples.ix[:, 'annotation'].dropna()
-                                        .sort_values().unique()):
-                    # 1-to-1 map
-                    a_to_value[a] = a_i
-                    value_to_a[a_i] = a
-                samples.ix[:,
-                           'annotation_for_plot'] = samples.ix[:,
-                                                               'annotation'].apply(
-                                                                   a_to_value.
-                                                                   get)
+            # Make vector
+            if normalize_annotation:
+                samples.ix[:, 'a'] = normalize_2d_or_1d(
+                    samples.ix[:, 'annotation'].astype(float), '-0-').clip(
+                        lower=-std_max, upper=std_max)
             else:
-                samples.ix[:, 'annotation_for_plot'] = samples.ix[:,
-                                                                  'annotation']
+                annotation_scale == 'relative'
+
             # Get annotation statistics
-            annotation_min = 0
-            annotation_mean = samples.ix[:, 'annotation_for_plot'].mean()
-            annotation_max = samples.ix[:, 'annotation_for_plot'].max()
-            # Set color map
-            if annotation_type == 'categorical':
-                cmap = CMAP_CATEGORICAL
-            elif annotation_type == 'binary':
-                cmap = CMAP_BINARY
-            else:
-                raise ValueError(
-                    'annotation_type must be one of {continuous, categorical, binary}.'
-                )
-        # Get annotation range
-        annotation_range = annotation_max - annotation_min
+            a_mean = samples.ix[:, 'a'].mean()
+            if annotation_scale == 'relative':
+                a_min = samples.ix[:, 'a'].min()
+                a_max = samples.ix[:, 'a'].max()
+            elif annotation_scale == 'std':
+                a_min = -std_max
+                a_max = std_max
+            a_range = a_max - a_min
+
+        except ValueError:
+            # Make vector by mapping object to int
+            o_to_i = {}
+            i_to_o = {}
+            for i, o in enumerate(samples.ix[:, 'annotation'].dropna()
+                                  .sort_values().unique()):
+                o_to_i[o] = i
+                i_to_o[i] = o
+            samples.ix[:, 'a'] = samples.ix[:, 'annotation'].apply(o_to_i.get)
+
+            # Get annotation statistics
+            a_mean = samples.ix[:, 'a'].mean()
+            a_min = 0
+            a_max = samples.ix[:, 'a'].max()
+            a_range = a_max - a_min
 
         # Compute and plot IC
-        score, p_val = compute_association_and_pvalue(
-            samples.ix[:, 'annotation_for_plot'], samples.ix[:, 'state'])
+        ic, p = compute_association_and_pvalue(samples.ix[:, 'a'],
+                                               samples.ix[:, 'state'])
         ax_legend.text(
             0.5,
             1,
-            '{}\nIC={:.3f} (p-val={:.3f})'.format(annotation_name, score,
-                                                  p_val),
+            '{}\nIC={:.3f} (p-val={:.3f})'.format(annotation_name, ic, p),
             fontsize=legend_fontsize * 1.26,
             weight='bold',
             horizontalalignment='center')
 
+        if not annotation_type:  # Set annotation type
+            if samples.ix[:, 'annotation'].dropna().unique().size <= 2:
+                annotation_type = 'binary'
+            elif samples.ix[:, 'annotation'].dropna().unique().size <= int(
+                    0.5 * samples.ix[:, 'annotation'].dropna().size):
+                annotation_type = 'categorical'
+            else:
+                annotation_type = 'continuous'
+
+        # Set colormap
+        if annotation_type == 'binary':
+            cmap = CMAP_BINARY
+        elif annotation_type == 'categorical':
+            cmap = CMAP_CATEGORICAL
+        else:
+            cmap = CMAP_CONTINUOUS
+
         # Set plotting order and plot
         if highlight_high_magnitude:
-            samples = samples.ix[samples.ix[:, 'annotation_for_plot'].abs()
-                                 .sort_values(na_position='first').index, :]
+            samples = samples.ix[samples.ix[:, 'a'].abs().sort_values(
+                na_position='first').index, :]
         else:
             samples.sort_values(
-                'annotation_for_plot',
+                'a',
                 ascending=annotation_ascending,
                 na_position='first',
                 inplace=True)
-        for idx, s in samples.iterrows():
-            a = s.ix['annotation_for_plot']
-            if isnull(a):  # Missing annotation
+        for i, (x, y, a) in samples[['x', 'y', 'a']].iterrows():
+            if isnull(a):
                 if not plot_samples_with_missing_annotation:
                     continue
                 else:
@@ -1552,20 +1484,13 @@ def _plot_onco_gps(
                     c = bad_color
             else:
                 markersize = sample_markersize
-                if annotation_type == 'continuous':
-                    c = cmap((a - annotation_min) / annotation_range)
-                elif annotation_type in ('categorical', 'binary'):
-                    if annotation_range:
-                        c = cmap((a - annotation_min) / annotation_range)
-                    else:
-                        c = cmap(0)
+                if a_range:
+                    c = cmap((a - a_min) / a_range)
                 else:
-                    raise ValueError(
-                        'annotation_type must be one of {continuous, categorical, binary}.'
-                    )
+                    c = cmap(0)
             ax_map.plot(
-                s.ix['x'],
-                s.ix['y'],
+                x,
+                y,
                 marker='o',
                 markersize=markersize,
                 markerfacecolor=c,
@@ -1575,17 +1500,29 @@ def _plot_onco_gps(
                 clip_on=False,
                 zorder=5)
 
-        # Plot categorical legends below the map
-        if samples.ix[:, 'annotation'].dtype == object:
-            for i, a in enumerate(sorted(a_to_value, reverse=True)):
-                v = a_to_value.get(a)
-                x = 1 - float(1 / (len(a_to_value) + 1)) * (i + 1)
+        if annotation_type == 'continuous':  # Plot color bar
+            cax, kw = make_axes(
+                ax_legend,
+                location='bottom',
+                fraction=0.1,
+                shrink=1,
+                aspect=8,
+                cmap=cmap,
+                norm=Normalize(vmin=a_min, vmax=a_max),
+                ticks=[a_min, a_mean, a_max])
+            ColorbarBase(cax, **kw)
+            decorate(ax=cax, xtick_rotation=90)
+
+        if o_to_i:  # Plot categorical legends below the map
+            for i, o in enumerate(sorted(o_to_i, reverse=True)):
+                int_ = o_to_i.get(o)
+                x = 1 - float(1 / (len(o_to_i) + 1)) * (i + 1)
                 y = -0.1
-                if annotation_range:
-                    c = cmap((v - annotation_min) / annotation_range)
+                if a_range:
+                    c = cmap((int_ - a_min) / a_range)
                 else:
                     c = cmap(0)
-                if 5 < len(a):
+                if 5 < len(o):
                     rotation = 90
                 else:
                     rotation = 0
@@ -1600,28 +1537,13 @@ def _plot_onco_gps(
                 ax_map.text(
                     x,
                     y - 0.03,
-                    a,
+                    o,
                     fontsize=legend_fontsize,
                     weight='bold',
                     color=title_fontcolor,
                     rotation=rotation,
                     horizontalalignment='center',
                     verticalalignment='top')
-
-        if annotation_type == 'continuous':  # Plot color bar
-            cax, kw = make_axes(
-                ax_legend,
-                location='bottom',
-                fraction=0.1,
-                shrink=1,
-                aspect=8,
-                cmap=cmap,
-                norm=Normalize(vmin=annotation_min, vmax=annotation_max),
-                ticks=[annotation_min, annotation_mean, annotation_max])
-            ColorbarBase(cax, **kw)
-            cax.set_title('Normalized Values',
-                          **{'fontsize': 16,
-                             'weight': 'bold'})
 
     else:  # Plot samples using state colors
         normalized_component_ratio = normalize_2d_or_1d(
@@ -1632,7 +1554,7 @@ def _plot_onco_gps(
         else:
             samples.ix[:, 'component_ratio_for_plot'] = 1
 
-        for idx, s in samples.iterrows():
+        for i, s in samples.iterrows():
             ax_map.plot(
                 s.ix['x'],
                 s.ix['y'],
@@ -1647,11 +1569,11 @@ def _plot_onco_gps(
                 zorder=5)
 
     if sample_name_color:  # Plot sample names
-        for idx, s in samples.iterrows():
+        for i, s in samples.iterrows():
             ax_map.text(
                 s.ix['x'],
                 s.ix['y'] + 0.03,
-                idx,
+                i,
                 fontsize=sample_name_size,
                 weight='bold',
                 color=sample_name_color,
@@ -1659,7 +1581,7 @@ def _plot_onco_gps(
                 zorder=7)
 
     if filepath:
-        save_plot(filepath, format=format, dpi=dpi)
+        save_plot(filepath, file_extension=format, dpi=dpi)
 
     return samples
 
@@ -1693,11 +1615,46 @@ def make_oncogps_in_3d(
         sample_marker_opacity=0.92,
         sample_marker_line_width=0.19,
         sample_marker_line_color='9017E6', ):
+    """
+
+    :param training_h:
+    :param training_states:
+    :param filepath:
+    :param std_max:
+    :param mds_seed:
+    :param power:
+    :param fit_min:
+    :param fit_max:
+    :param power_min:
+    :param power_max:
+    :param samples_to_plot:
+    :param training_annotation:
+    :param title:
+    :param titlefont_size:
+    :param titlefont_color:
+    :param paper_bgcolor:
+    :param plot_bgcolor:
+    :param component_marker_size:
+    :param component_marker_opacity:
+    :param component_marker_line_width:
+    :param component_marker_line_color:
+    :param component_marker_color:
+    :param component_textfont_size:
+    :param component_textfont_color:
+    :param state_colors:
+    :param sample_marker_size:
+    :param sample_marker_opacity:
+    :param sample_marker_line_width:
+    :param sample_marker_line_color:
+    :return:
+    """
+
     # ==========================================================================
     # Process training H matrix
     #   Set H matrix's indices to be str (better for .ix)
     #   Drop samples with all-0 values before normalization
-    #   Normalize H matrix (May save normalizing parameters for normalizing testing H matrix later)
+    #   Normalize H matrix (May save normalizing parameters for normalizing
+    # testing H matrix later)
     #       -0- normalize
     #       Clip values over 3 standard deviation
     #       0-1 normalize
@@ -1726,7 +1683,8 @@ def make_oncogps_in_3d(
     # ==========================================================================
     # Get training component power
     #   If n_pulls is not specified, all components pull a sample
-    #   If power is not specified, compute component power by fitting (power will be 1 if fitting fails)
+    #   If power is not specified, compute component power by fitting (power
+    # will be 1 if fitting fails)
     # ==========================================================================
     n_pulls = training_h.shape[0]
     if not power:
@@ -1756,8 +1714,8 @@ def make_oncogps_in_3d(
         columns=['x', 'y', 'z', 'state', 'annotation'])
 
     print_log(
-        'Computing training sample coordinates using {} components and {:.3f} power ...'.
-        format(n_pulls, power))
+        'Computing training sample coordinates using {} components and {:.3f} '
+        'power ...'.format(n_pulls, power))
     training_samples.ix[:, ['x', 'y', 'z']] = _compute_sample_coordinates(
         components, training_h, n_pulls, power)
 
@@ -1793,12 +1751,6 @@ def make_oncogps_in_3d(
         titlefont=dict(
             size=titlefont_size,
             color=titlefont_color, ),
-        # margin=dict(
-        #     l=0,
-        #     r=0,
-        #     b=0,
-        #     t=0,
-        # ),
         paper_bgcolor=paper_bgcolor,
         plot_bgcolor=plot_bgcolor, )
 
